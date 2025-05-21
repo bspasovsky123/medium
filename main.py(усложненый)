@@ -1,0 +1,142 @@
+import sqlite3
+from datetime import datetime
+import qrcode
+
+# Создаем/открываем базу данных
+conn = sqlite3.connect('requests.db')
+cursor = conn.cursor()
+
+# Создание таблицы, если она ещё не существует
+cursor.execute('''CREATE TABLE IF NOT EXISTS requests (
+                    id TEXT PRIMARY KEY,
+                    date TEXT,
+                    equip TEXT,
+                    fault TEXT,
+                    desc TEXT,
+                    client TEXT,
+                    status TEXT,
+                    exec TEXT,
+                    manager TEXT,
+                    time_started TEXT,
+                    time_completed TEXT)''')
+
+request = []
+
+users = {'admin': {'password': 'admin123', 'role': 'manager'}, 'worker': {'password': 'worker123', 'role': 'executor'}}
+current_user = None
+
+def login():
+    global current_user
+    username = input("Логин: ")
+    password = input("Пароль: ")
+    if users.get(username, {}).get('password') == password:
+        current_user = username
+        print(f"Добро пожаловать, {username}!")
+    else:
+        print("Неверный логин или пароль")
+        login()  # Повторный вызов логина в случае ошибки
+
+def start():
+    # Вставка заявки в базу данных
+    request_id = input("ID заявки: ")
+    date = input("Дата: ")
+    equip = input("Оборудование: ")
+    fault = input("Тип неисправности: ")
+    desc = input("Описание проблемы: ")
+    client = input("Клиент: ")
+    status = 'ожидание'
+    exec = ''
+    manager = ''
+    time_started = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    cursor.execute('''INSERT INTO requests (id, date, equip, fault, desc, client, status, exec, manager, time_started)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                   (request_id, date, equip, fault, desc, client, status, exec, manager, time_started))
+    conn.commit()
+    print("Заявка создана")
+
+def end():
+    request_id = input("Введите номер заявки: ")
+    cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
+    row = cursor.fetchone()
+    if row:
+        status = input("Новый статус заявки (в ожидании, в работе, выполнено): ")
+        desc = input("Новое описание: ")
+        exec = input("Исполнитель: ")
+        time_completed = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        cursor.execute('''UPDATE requests SET status = ?, desc = ?, exec = ?, time_completed = ? WHERE id = ?''',
+                       (status, desc, exec, time_completed, request_id))
+        conn.commit()
+        print("Заявка обновлена")
+    else:
+        print("Заявка не найдена")
+
+def show():
+    cursor.execute("SELECT * FROM requests")
+    rows = cursor.fetchall()
+    if not rows:
+        print("Заявки не найдены")
+        return
+    for row in rows:
+        print(f"ID: {row[0]}, Статус: {row[6]}, Исполнитель: {row[7]}, Менеджер: {row[8]}")
+
+def assign_manager():
+    request_id = input("Введите ID заявки для назначения менеджера: ")
+    cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
+    row = cursor.fetchone()
+    if row:
+        manager = input("Введите имя менеджера: ")
+        cursor.execute('''UPDATE requests SET manager = ?, status = 'Менеджер назначен' WHERE id = ?''',
+                       (manager, request_id))
+        conn.commit()
+        print(f"Менеджер {manager} назначен для заявки {request_id}")
+    else:
+        print("Заявка не найдена")
+
+# Подсчёт выполненных заявок и среднего времени выполнения
+def calculate_statistics():
+    cursor.execute("SELECT * FROM requests WHERE status = 'выполнено'")
+    completed = cursor.fetchall()
+    if completed:
+        total_time = sum([(datetime.strptime(r[10], '%Y-%m-%d %H:%M:%S') - datetime.strptime(r[9], '%Y-%m-%d %H:%M:%S')).total_seconds() for r in completed])
+        print(f"Выполнено заявок: {len(completed)}")
+        print(f"Среднее время выполнения: {total_time / len(completed) / 60:.2f} минут")
+    else:
+        print("Нет выполненных заявок")
+
+# Генерация QR-кода для формы отзыва
+def generate_qr_code():
+    url = "https://example.com/feedback"  # Это должна быть ссылка на форму для отзывов
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(url)
+    qr.make(fit=True)
+
+    img = qr.make_image(fill='black', back_color='white')
+    img.save("feedback_qr_code.png")
+    print("QR-код для отзыва сгенерирован и сохранён как 'feedback_qr_code.png'.")
+
+actions = {
+    '1': start,
+    '2': end,
+    '3': show,
+    '4': assign_manager,
+    '5': calculate_statistics,
+    '6': generate_qr_code
+}
+
+while True:
+    choice = input("\n1 - Создать заявку\n2 - Редактировать заявку\n3 - Показать заявку\n4 - Назначить менеджера\n5 - Статистика\n6 - Генерация QR-кода\n0 - Выход\nВаш выбор: ")
+    if choice == '0':
+        break
+    actions.get(choice, lambda: print("Неверный выбор"))()
+
+# Закрытие соединения с базой данных
+conn.close()
+
+print("Программа завершена")
